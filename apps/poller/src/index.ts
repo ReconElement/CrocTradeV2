@@ -1,17 +1,31 @@
-import {createClient} from 'redis';
 import WebSocket from 'ws';
 const webSocketUri = new WebSocket("wss://ws.backpack.exchange");
+import {createClient} from 'redis';
 const redisClient = createClient({
     url: "redis://localhost:6379"
 });
-
 try{
     await redisClient.connect();
 }catch(e){
-    console.log(`Some error ocurred while connecting to the redis client: ${e}`);
+    console.log(`Some error ocurred while connecting to the redis client: ${e}`)
 }
-
-async function getDataWS(){
+let newSendObject: DataObject = {
+        price_updates: [{
+            asset: "BTC",
+            price: 0,
+            decimal: 0   
+        },{
+            asset: "ETH",
+            price: 0,
+            decimal: 0
+        },{
+            asset: "SOL",
+            price: 0,
+            decimal: 0
+        }]
+    }
+export default async function dataPush2(){
+   
     let dataCollection: WebSocket.RawData[] = [];
     const subscribeMessage = {
         method: "SUBSCRIBE",
@@ -22,84 +36,68 @@ async function getDataWS(){
     });
     webSocketUri.on('message',async (data)=>{
         dataCollection.push(data);
-        if(dataCollection.length>=100){
-            await collectDataAndSend(dataCollection);
+        if(dataCollection.length>=70){
+            // await collectAndSend(dataCollection);
+            await collectAndSend(dataCollection);
             dataCollection = [];
         }
     })
-};
-
-await getDataWS();
-
-type recievedValue = {
-    SOL_USDC: {
-        asset: "SOL_USDC",
-        price: number,
-        decimal: number,
-    },
-    BTC_USDC: {
-        asset: "BTC_USDC",
-        price: number,
-        decimal: number
-    },
-    ETH_USDC: {
-        asset: "ETH_USDC",
-        price: number,
-        decimal: number
-    }
 }
-async function collectDataAndSend(data: WebSocket.RawData[]){
-    let obj: recievedValue = {
-        SOL_USDC: {
-            asset: "SOL_USDC",
-            price: 0,
-            decimal: 0
-        },
-        BTC_USDC: {
-            asset: "BTC_USDC",
-            price: 0,
-            decimal: 0
-        },
-        ETH_USDC: {
-            asset: "ETH_USDC",
-            price: 0,
-            decimal: 0
-        }
-    };
-    for(let i=data.length-1;i>=60;i--){
-        // console.log(JSON.parse(data[i]?.toString()));
-        const value = JSON.parse(data[i]?.toString()??" ");
-        if(value?.data?.s==="SOL_USDC"){
-            obj.SOL_USDC = {
-                asset: "SOL_USDC",
-                price: Number(Math.trunc(value?.data?.b*10000)),
-                decimal: 4
-            }
-        }
-        if(value?.data?.s==="BTC_USDC"){
-            obj.BTC_USDC = {
-                asset: "BTC_USDC",
-                price: Number(Math.trunc(value?.data?.b*10000)),
-                decimal: 4
-            }
-        }
-        if(value?.data?.s==="ETH_USDC"){
-            obj.ETH_USDC = {
-                asset: "ETH_USDC",
-                price: Number(Math.trunc(value?.data?.b*10000)),
-                decimal: 4
-            }
-        }
-    };
-    try{
-        setInterval(async ()=>{
-            const res = await redisClient.xAdd("stream","*",{
-                data: JSON.stringify(obj)
-            });
-            console.log(res);
-        },100)
-    }catch(e){
-        console.log(`Some error occurred while sending stream data on redis: ${e}`);
-    }
+type DataObject = {
+    price_updates: [{
+        asset: "BTC",
+        price: number,
+        decimal: number
+    },{
+        asset: "ETH",
+        price: number,
+        decimal: number
+    },{
+        asset: "SOL",
+        price: number,
+        decimal: number
+    }]
 };
-
+async function collectAndSend(dataCollection: WebSocket.RawData[]){
+    let sendObject: DataObject = {
+        price_updates: [{
+            asset: "BTC",
+            price: 0,
+            decimal: 0
+        },{
+            asset: "ETH",
+            price: 0,
+            decimal: 0
+        },{
+            asset: "SOL",
+            price: 0,
+            decimal: 0
+        }]
+    }
+    let collection = dataCollection.reverse();
+    collection.forEach((data)=>{
+        const recievedObj = JSON.parse(data.toString()).data;
+        switch(recievedObj.s){
+            case 'BTC_USDC':
+                sendObject.price_updates[0].price = Math.trunc(recievedObj.b*10000);
+                sendObject.price_updates[0].decimal = 4;
+                break;
+            case 'ETH_USDC':
+                sendObject.price_updates[1].price = Math.trunc(recievedObj.b*10000);
+                sendObject.price_updates[1].decimal = 4;
+                break;
+            case 'SOL_USDC':
+                sendObject.price_updates[2].price = Math.trunc(recievedObj.b*10000);
+                sendObject.price_updates[2].decimal = 4;
+                break;
+        }
+        if(sendObject.price_updates[0].price!==0 && sendObject.price_updates[1].price!==0 && sendObject.price_updates[2].price!==0){
+            newSendObject = sendObject;
+            return;
+        }
+    })
+    console.log(newSendObject);
+    const sentData = await redisClient.xAdd("stream","*",{
+        data: JSON.stringify(newSendObject)
+    });
+}
