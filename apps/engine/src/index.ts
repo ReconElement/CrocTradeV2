@@ -40,13 +40,10 @@ let PRICES: Rates = {
     }
 };
 
-
+//updates every 100 miliseconds, to the latest price obtained from the poller
 setInterval(async ()=>{
 	PRICES=await getData()
 }, 100);
 
 
-setInterval(()=>{
-	console.log(PRICES);
-}, 2000);
 
